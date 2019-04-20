@@ -51,4 +51,23 @@ typedef struct {
 
 #define SHM_MAP_NAME "/shm_naves"
 
+
+/**
+ * @brief Mueve la nave introducida como argumento a la casilla introducida como argumento
+ * @param nave La nave que se cambiará de posicion
+ * @param new_x la coordenada x de la nueva casilla a la que se movera la nave
+ * @param new_y la coordenada y de la nueva casilla a la que se movera la nave
+ * @return Nada (tipo void)
+ */
+void mover(tipo_mapa *mapa,tipo_nave *nave, int new_x, int new_y);
+
+/**
+ * @brief Mueve la nave introducida como argumento a la casilla introducida como argumento
+ * @param mapa el mapa en el que se esta jugando la partida
+ * @param x la coordenada x de la nueva casilla a la que se movera la nave
+ * @param y la coordenada y de la nueva casilla a la que se movera la nave
+ * @return Nada (tipo void)
+ */
+void atacar(tipo_mapa *mapa,tipo_nave nave_atacante ,int x, int y);
+
 #endif /* SRC_SIMULADOR_H_ */
