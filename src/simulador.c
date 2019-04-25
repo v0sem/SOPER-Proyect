@@ -13,6 +13,39 @@
 
 #include <mapa.h>
 
+#define ALARM 30
+
+#define SHM_NAME "simulador_shm"
+
+typedef struct{
+    int flag_alarm; //El flag que identifica que se ha activado la señal de alarm
+    tipo_mapa mapa; //EL mapa
+    tipo_nave nave[N_EQUIPOS][N_NAVES];
+    } sharedMemoryStruct;
+
+
+void manejador_SIGALRM(int sig) {
+    /*Abrimos la memoria compartida*/
+    int fd_shm = shm_open(SHM_NAME, O_RDWR, 0); 
+    
+    if(fd_shm == -1){
+        fprintf (stderr, "Error opening the shared memory segment \n");
+        return;
+    }
+    
+    /* Map the memory segment */
+    sharedMemoryStruct * example_struct = mmap(NULL, sizeof(*example_struct),PROT_READ, MAP_SHARED, fd_shm, 0);
+    
+    if(example_struct == MAP_FAILED){
+        fprintf (stderr, "Error mapping the shared memory segment \n");
+        return;
+    }
+    
+    example_struct->flag_alarm = 1;
+
+    munmap(example_struct, sizeof(*example_struct));
+}
+
 
 int main() {
     
@@ -20,14 +53,16 @@ int main() {
     /***********************Inicialicamos variables*****************************/
     /***************************************************************************/
     int i, j, aux1, aux2; //Seguro que hace falta
+    int end_simulation = 0;
     int ret = 0;
-    tipo_mapa *mapa = NULL; //El mapa. Ya tiene las naves asignadas.
-    tipo_nave nave[N_EQUIPOS][N_NAVES];
+    struct sigaction act;
+
+    char string[] = "TURNO";
 
     pid_t pid_boss; //Para los procesos hijos
 
     /*Necesito una pipe para comunicarme con el jefe de cada equipo*/
-    int pipe_enviar[N_EQUIPOS][2], pipe_recibir[N_EQUIPOS][2];
+    int pipe_simulador_jefe[N_EQUIPOS][2];
     int nbytes, pipe_status[N_EQUIPOS];
 
 
@@ -35,25 +70,42 @@ int main() {
     /***********************Inicialicamos recursos******************************/
     /***************************************************************************/
 
-    /********************************el mapa************************************/
-
-    /*Le asignamos memoria*/
-    mapa = (tipo_mapa*)calloc(1,sizeof(tipo_mapa));
-    if (mapa == NULL){
-        printf("[ERROR] El mapa no se ha reservado memoria de forma correcta\n");
+    /*************************Memoria compartida********************************/
+    int fd_shm = shm_open(SHM_NAME, O_RDWR | O_CREAT | O_EXCL,S_IRUSR | S_IWUSR);
+    if(fd_shm == -1){
+        printf("[ERROR] No se ha creado correctamente la memoria compartida");
         return -1;
     }
 
+    int error = ftruncate(fd_shm, sizeof(sharedMemoryStruct));
+
+    if(error == -1){fprintf (stderr, "Error resizing the shared memory segment \n");
+        shm_unlink(SHM_NAME);
+        return EXIT_FAILURE;
+    
+    }
+    /* Mapeamos la memoria compartida */
+    sharedMemoryStruct * shared_memory = mmap(NULL, sizeof(*shared_memory),PROT_READ | PROT_WRITE, MAP_SHARED, fd_shm, 0);
+    if(shared_memory == MAP_FAILED){
+    fprintf (stderr, "Error mapping the shared memory segment \n");
+    shm_unlink(SHM_NAME);
+    return EXIT_FAILURE;
+    }
+
+    /*La memoria compartida ya esta creada*/
+    
+    /********************************el mapa************************************/
+
     /*Inicializamos todas las casillas con vacio.*/
-    mapa_restore(mapa);
+    mapa_restore(&shared_memory->mapa);
 
     /*Inicializo cada nave*/
     for(i = 0; i<N_EQUIPOS; i++){
         for(j=0; j<N_NAVES; j++){
-            nave[i][j].vida = VIDA_MAX;
-            nave[i][j].equipo = i;
-            nave[i][j].numNave = j;
-            nave[i][j].viva = 1;
+            shared_memory->nave[i][j].equipo = i;
+            shared_memory->nave[i][j].vida = VIDA_MAX;
+            shared_memory->nave[i][j].numNave = j;
+            shared_memory->nave[i][j].viva = 1;
         }
     }
 
@@ -62,11 +114,11 @@ int main() {
     aux2 = 0;
     for(i = 0; i<N_EQUIPOS; i++){
         for(j=0; j<N_NAVES; j++){
-            nave[i][j].vida = VIDA_MAX;
-            nave[i][j].posx = i+aux1;
-            nave[i][j].posy = j+aux2;
-            nave[i][j].viva = true;
-            mapa_set_nave(mapa, nave[i][j]);
+            shared_memory->nave[i][j].vida = VIDA_MAX;
+            shared_memory->nave[i][j].posx = i+aux1;
+            shared_memory->nave[i][j].posy = j+aux2;
+            shared_memory->nave[i][j].viva = true;
+            mapa_set_nave(&shared_memory->mapa, shared_memory->nave[i][j]);
         }
         aux1 += 5;
         aux2 += 5;
@@ -82,18 +134,55 @@ int main() {
 
         if(pid_boss < 0){ //Caso de error
             printf("[ERROR] ha fallado el fork para el equipo %d\n",i);
-            free(mapa);
+            munmap(shared_memory, sizeof(*shared_memory));
+            shm_unlink(SHM_NAME);
             return -1;
         }
 
         else if(pid_boss == 0){ //Hijo aka proceso jefe
 
+            /*inicializamos la pipe con la que se comunicara con el jefe*/
+            /* Cierre del descriptor de salida en el jefe */
+            close(pipe_simulador_jefe[i][1]);
+
+            /*Bucle que se ejecuta hasta el final de la partida*/
+            while(end_simulation == 0){
+
+            }
+            /*Termina el proceso cuando termina la simulacion*/
+            exit(EXIT_SUCCESS);
         }
 
-        else{ //Proceso padre aka simulador
+        else{
+            /*El proceso padre se comunicara con el hijo mediante tuberias*/
+            /* Cierre del descriptor de entrada en el simulador */
+            close(pipe_simulador_jefe[i][0]);
+        }
 
+    }
 
-            
+    /*Proceso simulador tras crear a los jefes*/
+
+    /*Hacemos todo lo relativo a la alarma*/
+    sigemptyset(&(act.sa_mask));
+    act.sa_flags = 0;
+    /* Se arma la señal SIGALRM. */
+    act.sa_handler = manejador_SIGALRM;
+    if (sigaction(SIGALRM, &act, NULL) < 0) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+
+    /*Montamos la alarma*/
+    if (alarm(ALARM))
+        fprintf(stderr, "Existe una alarma previa establecida\n");
+
+    while(end_simulation == 0){
+        if(shared_memory->flag_alarm == 1){
+            for (i=0; i<N_EQUIPOS; i++){
+                write(pipe_simulador_jefe[i][1], string, strlen(string));
+            }
+            shared_memory->flag_alarm = 0;
         }
 
     }
@@ -105,8 +194,9 @@ int main() {
         wait(0);
     }
 
-	/*Liberamos memoria*/
-	free(mapa);
+	/*Liberamos recursos*/
+	munmap(shared_memory, sizeof(*shared_memory));
+    shm_unlink(SHM_NAME);
 
     exit(ret);
     
