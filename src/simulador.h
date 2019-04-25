@@ -25,6 +25,9 @@ extern char symbol_equipos[N_EQUIPOS]; // Símbolos de los diferentes equipos en
 
 /*** NOMBRES GLOBALES ***/
 #define MQ_NAME "/mq_actions"
+#define ALARM 30
+#define SHM_NAME "simulador_shm"
+
 /*** MAPA ***/
 // Información de nave
 typedef struct {
