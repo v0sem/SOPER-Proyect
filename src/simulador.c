@@ -13,6 +13,10 @@
 
 #include <mapa.h>
 
+typedef struct {
+    char action[20];
+}Mensaje;
+
 
 int main() {
     
@@ -24,12 +28,22 @@ int main() {
     tipo_mapa *mapa = NULL; //El mapa. Ya tiene las naves asignadas.
     tipo_nave nave[N_EQUIPOS][N_NAVES];
 
-    pid_t pid_boss; //Para los procesos hijos
+    pid_t pid_boss, pid_ship; //Para los procesos hijos
 
     /*Necesito una pipe para comunicarme con el jefe de cada equipo*/
     int pipe_enviar[N_EQUIPOS][2], pipe_recibir[N_EQUIPOS][2];
     int nbytes, pipe_status[N_EQUIPOS];
 
+    /*Cola de mensajes para comunicacion entre naves y simulador*/
+    mqd_t msg_queue;
+    Mensaje action;
+    
+    struct mq_attr attributes = {
+            .mq_flags = 0,
+            .mq_maxmsg = 10,
+            .mq_curmsgs = 0,
+            .mq_msgsize = sizeof(Mensaje)
+    };
 
     /***************************************************************************/
     /***********************Inicialicamos recursos******************************/
@@ -77,6 +91,16 @@ int main() {
     /***************************************************************************/
 
 
+    /**********Creamos la cola de mensajes**********/
+    msg_queue = mq_open(MQ_NAME,
+                O_CREAT, O_RDWR,
+                &attributes);
+   
+    if(msg_queue == (mqd_t)-1){
+        printf("[ERROR] Opening the message queue");
+        return -1;
+    }
+
     for(i=0; i<N_EQUIPOS; i++){
         pid_boss = fork();
 
@@ -88,6 +112,21 @@ int main() {
 
         else if(pid_boss == 0){ //Hijo aka proceso jefe
 
+        /***********Creamos los procesos nave***********/
+            for(j = 0; j < N_NAVES; j++){
+                pid_ship = fork();
+
+                if(pid_ship < 0){//Caso de error
+                    printf("[ERROR] ha fallado el fork para la nave %d"
+                    " en el equipo %d\n", i, j);
+                    free(mapa);
+                    return -1;
+                }
+                else if(pid_ship = 0){//Caso hijo (Nave)
+
+                }
+            }
+        
         }
 
         else{ //Proceso padre aka simulador
