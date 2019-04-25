@@ -52,12 +52,13 @@ int main() {
     /***************************************************************************/
     /***********************Inicialicamos variables*****************************/
     /***************************************************************************/
-    int i, j, aux1, aux2; //Seguro que hace falta
+    int i, j, aux1, aux2, equipos_vivos; //Seguro que hace falta
     int end_simulation = 0;
     int ret = 0;
     struct sigaction act;
 
-    char string[] = "TURNO";
+    char string_turno[] = "TURNO";
+    char string_fin[] = "FIN";
 
     pid_t pid_boss, pid_ship; //Para los procesos hijos
 
@@ -213,11 +214,41 @@ int main() {
         fprintf(stderr, "Existe una alarma previa establecida\n");
 
     while(end_simulation == 0){
+        /*Cuando recibe la señal de alarma*/
         if(shared_memory->flag_alarm == 1){
-            for (i=0; i<N_EQUIPOS; i++){
-                write(pipe_simulador_jefe[i][1], string, strlen(string));
+            /*Restaurar el mapa*/
+            mapa_restore(&shared_memory->mapa);
+
+            /*Comprobar condicion de ganador*/
+            equipos_vivos = 0;
+            for(i=0; i<N_EQUIPOS; i++){
+                for(j=0; j<N_NAVES; j++){
+                    /*Si hay al menos una nave viva en algun equipo*/
+                    if(shared_memory->nave[i][j].vida == true){
+                        equipos_vivos++;
+                        break;
+                    }
+                }
+                /*Aun hay equipos compitiendo*/
+                if (equipos_vivos == 2){
+                    break;
+                }
             }
+
+            /*Terminamos la partida. Hay un ganador*/
+            if(equipos_vivos == 1){
+                for (i=0; i<N_EQUIPOS; i++){
+                    write(pipe_simulador_jefe[i][1], string_fin, strlen(string_fin));
+                }
+            }
+            /*Nuevo turno para todos los equipos*/
+            else{
+                for (i=0; i<N_EQUIPOS; i++){
+                    write(pipe_simulador_jefe[i][1], string_turno, strlen(string_turno));
+                }
             shared_memory->flag_alarm = 0;
+            }
+            
         }
 
     }
