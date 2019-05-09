@@ -10,6 +10,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <semaphore.h>
 
 #include <simulador.h>
 #include <gamescreen.h>
@@ -31,13 +32,48 @@ void mapa_print(tipo_mapa *mapa)
 	screen_refresh();
 }
 
+typedef struct
+{
+	int flag_alarm; //El flag que identifica que se ha activado la señal de alarm
+	tipo_mapa mapa; //EL mapa
+	tipo_nave nave[N_EQUIPOS][N_NAVES];
+	int mensaje_simulador_jefe[N_EQUIPOS]; //para indicar los mensajes del jefe que debe leer el proceso simulador
+	int mensaje_jefe_simulador[N_EQUIPOS]; //para indicar los mensajes del simulador que tiene que leer cada jefe
+	int mensaje_jefe_nave[N_EQUIPOS][N_NAVES];
+	int contador_mqqueue;
+} sharedMemoryStruct;
+
 
 int main() {
 
 
 	screen_init();
 
+	/*Abrimos la memoria compartida*/
+	int fd_shm = shm_open(SHM_NAME, O_RDWR, S_IWUSR);
 
+	if (fd_shm == -1)
+	{
+		fprintf(stderr, "Error opening the shared memory segment \n");
+		return;
+	}
+
+	/* Map the memory segment */
+	sharedMemoryStruct *example_struct = mmap(NULL, sizeof(*example_struct), PROT_WRITE, MAP_SHARED, fd_shm, 0);
+
+	if (example_struct == MAP_FAILED)
+	{
+		fprintf(stderr, "Error mapping the shared memory segment \n");
+		return;
+	}
+
+	example_struct->flag_alarm = 1;
+
+	munmap(example_struct, sizeof(*example_struct));
+
+	while(1){
+		mapa_print(&(example_struct->mapa));
+	}
 
 	screen_end();
 

@@ -25,6 +25,7 @@ extern char symbol_equipos[N_EQUIPOS]; // Símbolos de los diferentes equipos en
 
 /*** NOMBRES GLOBALES ***/
 #define MQ_NAME "/mq_actions"
+#define SEM "/sem_actions"
 #define ALARM 30
 #define SHM_NAME "simulador_shm"
 
@@ -72,6 +73,6 @@ void mover(tipo_mapa *mapa,tipo_nave *nave, int new_x, int new_y);
  * @param y la coordenada y de la nueva casilla a la que se movera la nave
  * @return Nada (tipo void)
  */
-void atacar(tipo_mapa *mapa,tipo_nave nave_atacante ,int x, int y);
+tipo_nave* atacar(tipo_mapa *mapa,tipo_nave nave_atacante ,int x, int y);
 
 #endif /* SRC_SIMULADOR_H_ */

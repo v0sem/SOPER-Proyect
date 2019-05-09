@@ -10,6 +10,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <semaphore.h>
 
 #include <mapa.h>
 
@@ -30,6 +31,7 @@ typedef struct
 	int mensaje_simulador_jefe[N_EQUIPOS]; //para indicar los mensajes del jefe que debe leer el proceso simulador
 	int mensaje_jefe_simulador[N_EQUIPOS]; //para indicar los mensajes del simulador que tiene que leer cada jefe
 	int mensaje_jefe_nave[N_EQUIPOS][N_NAVES];
+	int contador_mqqueue;
 } sharedMemoryStruct;
 
 void manejador_SIGALRM(int sig)
@@ -77,11 +79,18 @@ int main()
 	int ret = 0;
 	struct sigaction act;
 
+	tipo_nave *nave_aux;
+
 	char string_turno[] = "TURNO";
 	char string_fin[] = "FIN";
 	char string_ataque[] = "ATAQUE";
+	char string_destruir[] = "DESTRUIR";
+	char string_mover[] = "MOVER_ALEATORIO";
+	char string_destruir_nave[12] = "";
 
 	char readbuffer[80];
+
+	sem_t *sem = NULL;
 
 	pid_t pid_boss, pid_ship; //Para los procesos hijos
 
@@ -144,6 +153,8 @@ int main()
 			shared_memory->mensaje_jefe_nave[i][j] = 0;
 		}
 	}
+
+	shared_memory->contador_mqqueue = 0;
 
 	/*La memoria compartida ya esta creada*/
 
@@ -241,7 +252,7 @@ int main()
 	printf("Simulador: Gestionando mp...\n\n");
 
 	msg_queue = mq_open(MQ_NAME,
-						O_CREAT,
+						O_CREAT | O_RDWR,
 						S_IRUSR | S_IWUSR,
 						&attributes);
 
@@ -253,6 +264,13 @@ int main()
 		return -1;
 	}
 	printf("Simulador: Creando a los procesos jefes\n\n");
+
+	/************************Creamos un semaforo********************************/
+	if ((sem = sem_open(SEM, O_CREAT | O_EXCL, S_IRUSR | S_IWUSR, 1)) == SEM_FAILED) {
+ 		perror("sem_open");
+ 		exit(EXIT_FAILURE);
+ 	}
+
 
 	/***************************************************************************/
 	/***********************Creamos los procesos jefes**************************/
@@ -295,26 +313,27 @@ int main()
 					while (1)
 					{
 
-						if (shared_memory->mensaje_jefe_nave > 0)
+						if (shared_memory->mensaje_jefe_nave[i][j] > 0)
 						{
+							strcpy(readbuffer, "                         ");
 							read(pipe_jefe_nave[i][j][0], readbuffer, sizeof(readbuffer));
 							printf("[NAVE %d DEL EQUIPO %d] recibido %s\n", i, j, readbuffer);
 							shared_memory->mensaje_jefe_nave[i][j]--;
 						
-							if(strcmp(string_ataque, readbuffer) == 0){
+							if(strstr(readbuffer, string_ataque) == 0){
 								/*La nave que es es su j y el equipo es el del proceso jefe (la i)*/
 								action = ship_attack(shared_memory->mapa, shared_memory->nave[i][j].posx, shared_memory->nave[i][j].posy);
 								printf("Accion que estoy enviando: %s y a la posicion %d %d\n\n",action.action,action.x, action.y);
 								action.i = i;
 								action.j = j;
 							}
-							else if(strcmp("MOVER_ALEATORIO", readbuffer) == 0){
+							else if(strstr(readbuffer, string_mover) == 0){
 								action = ship_move(shared_memory->mapa, shared_memory->nave[i][j].posx, shared_memory->nave[i][j].posy);
 								printf("Accion que estoy enviando: %s y a la posicion %d %d\n\n",action.action,action.x, action.y);
 								action.i = i;
 								action.j = j;
 							}
-							else if(strcmp("DESTRUIR", readbuffer) == 0){
+							else if(strcmp(string_destruir, readbuffer) == 0){
 								exit(EXIT_SUCCESS);
 							}
 
@@ -322,7 +341,12 @@ int main()
 								printf("[ERROR] Enviando la accion al simulador "
 								"desde la nave %d in team %d\n", j, i);
 							return -1;
-						}
+							}
+							
+							sem_wait(sem);
+							shared_memory->contador_mqqueue++;
+							sem_post(sem);
+
 						}
 					}
 				}
@@ -353,11 +377,42 @@ int main()
 					read(pipe_simulador_jefe[i][0], readbuffer, sizeof(readbuffer));
 					printf("[JEFE] %s\n", readbuffer);
 					shared_memory->mensaje_jefe_simulador[i]--;
+
 					if (strcmp("TURNO", readbuffer) == 0)
 					{
 						printf("[JEFE]: escribiendo... \n");
-						for (j = 0; j < N_NAVES; j++)
-							write(pipe_jefe_nave[i][j][1], string_turno, strlen(string_turno));
+						for (j = 0; j < N_NAVES; j++){
+							if(shared_memory->nave[i][j].viva != false){
+								while(shared_memory->mensaje_jefe_nave[i][j] != 0);
+								if(shared_memory->mensaje_jefe_nave[i][j] == 0){
+									write(pipe_jefe_nave[i][j][1], string_mover, strlen(string_mover));
+									shared_memory->mensaje_jefe_nave[i][j]++;
+								}
+							}
+						}
+
+						for (j = 0; j < N_NAVES; j++){
+							if(shared_memory->nave[i][j].viva != false){
+								while(shared_memory->mensaje_jefe_nave[i][j] != 0);
+								if(shared_memory->mensaje_jefe_nave[i][j] == 0){
+									write(pipe_jefe_nave[i][j][1], string_ataque, strlen(string_ataque));
+									shared_memory->mensaje_jefe_nave[i][j]++;
+								}
+							}
+						}
+					}
+					else if(strstr(readbuffer, "DESTRUIR") != NULL){
+						sscanf(readbuffer, "DESTRUIR %d", &aux1);
+						write(pipe_jefe_nave[i][aux1][1], string_destruir, strlen(string_destruir));
+					}
+					else if(strcmp(readbuffer, "FIN")){
+						signal(SIGTERM, SIG_IGN);
+						kill(0, SIGTERM);
+						for(j = 0; j < N_NAVES; j++){
+							wait(NULL);
+						}
+
+						exit(EXIT_SUCCESS);
 					}
 				}
 			}
@@ -402,6 +457,7 @@ int main()
 		/*Cuando recibe la señal de alarma*/
 		if (shared_memory->flag_alarm == 1)
 		{
+			shared_memory->flag_alarm = 0;
 			/*Restaurar el mapa*/
 			mapa_restore(&shared_memory->mapa);
 
@@ -459,20 +515,66 @@ int main()
 			}
 		}
 
-		for(i = 0; i < N_EQUIPOS * N_NAVES; i++){
+		for(i = 0, aux2=0; i < N_EQUIPOS; i++){
+			for(j = 0; j < N_NAVES; j++){
+				if(shared_memory->nave[i][j].viva == true)
+					aux2++;
+			}
+		}
+
+		for(i = 0; i < aux2*2	; i++){
 			
-			if(mq_receive(msg_queue, (char *)&action, sizeof(action), NULL) == -1){
-				printf("ERRORSITO\n");
+			if(shared_memory->contador_mqqueue > 0){
+				sem_wait(sem);
+				shared_memory->contador_mqqueue--;
+				sem_post(sem);
+				if(mq_receive(msg_queue, (char *)&action, sizeof(Mensaje), NULL) == -1){
+				printf("[ERROR]Cola de mensajes\n");
 			}
 
+			printf("[SIMULADOR] leido: %s\n",action.action);
+
 			if(strcmp(action.action, string_ataque) == 0){
-				atacar(&(shared_memory->mapa), shared_memory->nave[action.i][action.j],
+				nave_aux = atacar(&(shared_memory->mapa), shared_memory->nave[action.i][action.j],
 					action.x, action.y);
+
+				if(nave_aux->viva == false){
+					printf("OSTIAPUTA%d\n",shared_memory->mensaje_simulador_jefe[nave_aux->equipo]);
+					while(shared_memory->mensaje_simulador_jefe[nave_aux->equipo] > 0){
+						for(aux1 = 0; aux1 < N_NAVES; aux1++){
+							if(shared_memory->nave[nave_aux->equipo][aux1].viva == true){
+								break;
+							}
+						}
+
+						printf("AAAAAAAAAASDSDAAAFSASFASFSDFSD %d\n", aux1);
+
+						if(aux1 == N_NAVES){
+							write(pipe_simulador_jefe[nave_aux->equipo][1], string_fin,
+								strlen(string_fin));
+						}
+						else{
+							sprintf(string_destruir_nave, "DESTRUIR %d", nave_aux->numNave);
+
+							printf("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA%s\n", string_destruir_nave);
+
+							write(pipe_simulador_jefe[nave_aux->equipo][1], string_destruir_nave,
+								strlen(string_destruir_nave));
+						}
+					}
+				}
 			}
-			else if(strcmp(action.action, "MOVER_ALEATORIO") == 0){
+			else if(strcmp(action.action, string_mover) == 0){
 				mover(&(shared_memory->mapa), &(shared_memory->nave[action.i][action.j]),
 					action.x, action.y);
+					printf("[SIMULADOR] realizado una movicion\n");
 			}
+			}
+			
+
+			
+
+			
 		}
 	}
 
@@ -537,7 +639,7 @@ void mover(tipo_mapa *mapa, tipo_nave *nave, int new_x, int new_y)
 }
 
 /* Funcion que permite atacar a una casilla */
-void atacar(tipo_mapa *mapa, tipo_nave nave_atacante, int x, int y)
+tipo_nave* atacar(tipo_mapa *mapa, tipo_nave nave_atacante, int x, int y)
 {
 
 	tipo_casilla casilla_objetivo;
@@ -547,21 +649,21 @@ void atacar(tipo_mapa *mapa, tipo_nave nave_atacante, int x, int y)
 	if (mapa == NULL)
 	{
 		printf("[ERROR] Se ha introducido erroneamente el mapa en la funcion atacar\n");
+		return NULL;
 	}
-	return;
 
 	/*Comprobacion de que la casilla esta en el rango*/
 	if (x < 0 || y < 0 || x >= MAPA_MAXX || y >= MAPA_MAXY)
 	{
 		printf("[ERROR] No se puede atacar a la casilla %d %d porque se sale de los limites del mapa\n", x, y);
-		return;
+		return NULL;
 	}
 
 	/*Comprobacion de que podemos atacar a esa distancia*/
 	if (mapa_get_distancia(mapa, nave_atacante.posy, nave_atacante.posx, y, x) > ATAQUE_ALCANCE)
 	{
 		printf("[ERROR] la nave no se ha podido atacar a la casilla %d %d porque esta muy lejos de la nave atacante\n", x, y);
-		return;
+		return NULL;
 	}
 
 	/* Si ha pasado los controles puede atacar a esa casilla. */
@@ -572,7 +674,7 @@ void atacar(tipo_mapa *mapa, tipo_nave nave_atacante, int x, int y)
 	mapa_send_misil(mapa, nave_atacante.posy, nave_atacante.posx, y, x);
 
 	/* En el caso de que la casilla este vacia: agua*/
-	if (casilla_is_vacia(mapa, casilla_objetivo))
+	if (mapa_is_casilla_vacia(mapa, y, x) == true)
 	{
 		mapa_set_symbol(mapa, y, x, SYMB_AGUA);
 	}
@@ -594,10 +696,10 @@ void atacar(tipo_mapa *mapa, tipo_nave nave_atacante, int x, int y)
 		{
 			mapa_set_symbol(mapa, y, x, SYMB_DESTRUIDO);
 			nave_objetivo.viva = false;
-			/* TODO decirle al hijo que la destruya */
+			printf("[SIMULADOR] NAVE DEAD\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
 		}
 	}
-	return;
+	return &nave_objetivo;
 }
 
 Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy){
