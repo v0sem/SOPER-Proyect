@@ -73,6 +73,6 @@ void mover(tipo_mapa *mapa,tipo_nave *nave, int new_x, int new_y);
  * @param y la coordenada y de la nueva casilla a la que se movera la nave
  * @return Nada (tipo void)
  */
-tipo_nave* atacar(tipo_mapa *mapa,tipo_nave nave_atacante ,int x, int y);
+tipo_nave atacar(tipo_mapa *mapa,tipo_nave nave_atacante ,int x, int y);
 
 #endif /* SRC_SIMULADOR_H_ */

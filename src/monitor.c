@@ -16,18 +16,19 @@
 #include <gamescreen.h>
 #include <mapa.h>
 
-
 void mapa_print(tipo_mapa *mapa)
 {
-	int i,j;
+	int i, j;
 
-	for(j=0;j<MAPA_MAXY;j++) {
-		for(i=0;i<MAPA_MAXX;i++) {
-			tipo_casilla cas=mapa_get_casilla(mapa,j, i);
-			//printf("%c",cas.simbolo);
+	for (j = 0; j < MAPA_MAXY; j++)
+	{
+		for (i = 0; i < MAPA_MAXX; i++)
+		{
+			tipo_casilla cas = mapa_get_casilla(mapa, j, i);
+			printf("%c",cas.simbolo);
 			screen_addch(j, i, cas.simbolo);
 		}
-		//printf("\n");
+		printf("\n");
 	}
 	screen_refresh();
 }
@@ -43,9 +44,8 @@ typedef struct
 	int contador_mqqueue;
 } sharedMemoryStruct;
 
-
-int main() {
-
+int main()
+{
 
 	screen_init();
 
@@ -55,7 +55,7 @@ int main() {
 	if (fd_shm == -1)
 	{
 		fprintf(stderr, "Error opening the shared memory segment \n");
-		return;
+		return -1;
 	}
 
 	/* Map the memory segment */
@@ -64,19 +64,19 @@ int main() {
 	if (example_struct == MAP_FAILED)
 	{
 		fprintf(stderr, "Error mapping the shared memory segment \n");
-		return;
+		return -1;
 	}
 
 	example_struct->flag_alarm = 1;
 
 	munmap(example_struct, sizeof(*example_struct));
 
-	while(1){
+	while (1)
+	{
 		mapa_print(&(example_struct->mapa));
 	}
 
 	screen_end();
 
-
-	exit(EXIT_SUCCESS);
+	return 0;
 }
