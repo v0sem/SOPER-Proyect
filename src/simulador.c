@@ -92,8 +92,6 @@ int main()
 
 	sem_t *sem = NULL;
 
-	sem_t *sem = NULL;
-
 	pid_t pid_boss, pid_ship; //Para los procesos hijos
 
 	/*Necesito una pipe por jefe para para que el simulador envie mensajes a los jefes*/
@@ -614,11 +612,11 @@ int main()
 				nave_aux = atacar(&(shared_memory->mapa), shared_memory->nave[action.i][action.j],
 					action.x, action.y);
 
-				if(nave_aux->viva == false){
-					printf("OSTIAPUTA%d\n",shared_memory->mensaje_simulador_jefe[nave_aux->equipo]);
-					while(shared_memory->mensaje_simulador_jefe[nave_aux->equipo] > 0){
+				if(nave_aux.viva == false){
+					printf("OSTIAPUTA%d\n",shared_memory->mensaje_simulador_jefe[nave_aux.equipo]);
+					while(shared_memory->mensaje_simulador_jefe[nave_aux.equipo] > 0){
 						for(aux1 = 0; aux1 < N_NAVES; aux1++){
-							if(shared_memory->nave[nave_aux->equipo][aux1].viva == true){
+							if(shared_memory->nave[nave_aux.equipo][aux1].viva == true){
 								break;
 							}
 						}
@@ -626,15 +624,15 @@ int main()
 						printf("AAAAAAAAAASDSDAAAFSASFASFSDFSD %d\n", aux1);
 
 						if(aux1 == N_NAVES){
-							write(pipe_simulador_jefe[nave_aux->equipo][1], string_fin,
+							write(pipe_simulador_jefe[nave_aux.equipo][1], string_fin,
 								strlen(string_fin));
 						}
 						else{
-							sprintf(string_destruir_nave, "DESTRUIR %d", nave_aux->numNave);
+							sprintf(string_destruir_nave, "DESTRUIR %d", nave_aux.numNave);
 
 							printf("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA%s\n", string_destruir_nave);
 
-							write(pipe_simulador_jefe[nave_aux->equipo][1], string_destruir_nave,
+							write(pipe_simulador_jefe[nave_aux.equipo][1], string_destruir_nave,
 								strlen(string_destruir_nave));
 						}
 					}
@@ -787,9 +785,9 @@ Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy)
 	//Search for the nearest ship, in circles profressively larger around the ship
 	for (i = 1; i < MAPA_MAXX; i++)
 	{ //Choose the circle radius
-		for (x = -i; x <= i; x++)
+		for (x = orix - i; x <= orix + i; x++)
 		{
-			for (y = -i; y <= i; y++)
+			for (y = oriy - i; y <= oriy + i; y++)
 			{
 				if (x == i || y == i || x == -i || y == -i)
 				{ //Only those in the circunference
