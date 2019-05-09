@@ -23,6 +23,10 @@ extern char symbol_equipos[N_EQUIPOS]; // Símbolos de los diferentes equipos en
 #define MOVER_ALCANCE 1 // Máximo de casillas a mover
 #define TURNO_SECS 5 // Segundos que dura un turno
 
+/*** NOMBRES GLOBALES ***/
+#define MQ_NAME "/mq_actions"
+#define ALARM 30
+#define SHM_NAME "simulador_shm"
 
 /*** MAPA ***/
 // Información de nave
