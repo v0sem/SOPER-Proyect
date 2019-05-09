@@ -31,6 +31,7 @@ typedef struct
 	int mensaje_simulador_jefe[N_EQUIPOS]; //para indicar los mensajes del jefe que debe leer el proceso simulador
 	int mensaje_jefe_nave[N_EQUIPOS][N_NAVES];
 	int contador_mqqueue;
+	int final_programa;
 } sharedMemoryStruct;
 
 void manejador_SIGALRM(int sig)
@@ -62,6 +63,30 @@ void manejador_SIGUSR2(int sig)
 {
 	printf("Se ha recibido la señal SIGUSR2");
 	fflush(stdout);
+}
+
+void manejador_SIGINT(int sig)
+{
+	/*Abrimos la memoria compartida*/
+	int fd_shm = shm_open(SHM_NAME, O_RDWR, S_IWUSR);
+
+	if (fd_shm == -1)
+	{
+		return;
+	}
+
+	/* Map the memory segment */
+	sharedMemoryStruct *example_struct = mmap(NULL, sizeof(*example_struct), PROT_WRITE, MAP_SHARED, fd_shm, 0);
+
+	if (example_struct == MAP_FAILED)
+	{
+		fprintf(stderr, "Error mapping the shared memory segment \n");
+		return;
+	}
+
+	example_struct->final_programa = 1;
+	munmap(example_struct, sizeof(*example_struct));
+	
 }
 
 Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy);
@@ -154,6 +179,7 @@ int main()
 	}
 
 	shared_memory->contador_mqqueue = 0;
+	shared_memory->final_programa = 0;
 
 	/*La memoria compartida ya esta creada*/
 
@@ -255,6 +281,18 @@ int main()
 		return EXIT_FAILURE;
 	}
 
+	sigemptyset(&(act.sa_mask));
+	act.sa_flags = 0;
+
+	act.sa_handler = manejador_SIGINT;
+	if (sigaction(SIGINT, &act, NULL) < 0)
+	{
+		munmap(shared_memory, sizeof(*shared_memory));
+		shm_unlink(SHM_NAME);
+		perror("sigaction");
+		return EXIT_FAILURE;
+	}
+
 	/************************Creamos la cola de mensajes************************/
 	printf("Simulador: Gestionando mp...\n\n");
 
@@ -320,6 +358,9 @@ int main()
 
 					while (1)
 					{
+						if(shared_memory->final_programa == 1){
+							return 0;
+						}
 
 						if (shared_memory->mensaje_jefe_nave[i][j] == 1)
 						{
@@ -384,7 +425,7 @@ int main()
 			kill(getppid(), SIGUSR2);
 
 			/*bucle que se ejecuta hasta el final de la partida*/
-			while (end_simulation == 0)
+			while (end_simulation == 0 && shared_memory->final_programa == 0)
 			{
 				if (shared_memory->mensaje_simulador_jefe[i] == 1)
 				{
@@ -406,7 +447,7 @@ int main()
 									;
 									
 								write(pipe_jefe_nave[i][j][1], string_mover, strlen(string_mover));
-								shared_memory->mensaje_jefe_nave[i][j] = 1;
+								shared_memory->mensaje_jefe_nave[i][j] = 0;
 							}
 						}
 
@@ -429,7 +470,6 @@ int main()
 					{
 
 						sscanf(readbuffer_jefe[i], "DESTRUIR %d", &aux1);
-						printf("\n\n\n\n%d\n\n\n\n", aux1);
 						if (shared_memory->mensaje_jefe_nave[i][aux1] != -1)
 						{
 							printf("[PROCESO JEFE %d] destruyendo a la nave\n", i);
@@ -451,6 +491,8 @@ int main()
 
 						exit(EXIT_SUCCESS);
 					}
+
+					memset(readbuffer_jefe[i], 0, sizeof(readbuffer_jefe[i]));
 				}
 			}
 
@@ -490,7 +532,7 @@ int main()
 
 	shared_memory->flag_alarm = 0;
 	printf("[SIMULADOR] Entrando en el bucle de la simulacion\n");
-	while (end_simulation == 0)
+	while (end_simulation == 0 && shared_memory->final_programa == 0)
 	{
 
 		/*Cuando recibe la señal de alarma*/
@@ -537,6 +579,7 @@ int main()
 				{
 					while (shared_memory->mensaje_simulador_jefe[i] != 0)
 						;
+						printf("debug %d\n",i);
 					write(pipe_simulador_jefe[i][1], string_turno, strlen(string_turno));
 					shared_memory->mensaje_simulador_jefe[i] = 1;
 				}
