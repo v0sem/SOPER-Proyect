@@ -24,13 +24,10 @@ void mapa_print(tipo_mapa *mapa)
 	{
 		for (i = 0; i < MAPA_MAXX; i++)
 		{
-			tipo_casilla cas = mapa_get_casilla(mapa, j, i);
-			printf("%c",cas.simbolo);
-			screen_addch(j, i, cas.simbolo);
+			screen_addch(j, i, mapa_get_symbol(mapa, j, i));
+			screen_refresh();
 		}
-		printf("\n");
 	}
-	screen_refresh();
 }
 
 typedef struct
@@ -60,7 +57,7 @@ int main()
 	}
 
 	/* Map the memory segment */
-	sharedMemoryStruct *example_struct = mmap(NULL, sizeof(*example_struct), PROT_WRITE, MAP_SHARED, fd_shm, 0);
+	sharedMemoryStruct *example_struct = mmap(NULL, sizeof(*example_struct), PROT_READ, MAP_SHARED, fd_shm, 0);
 
 	if (example_struct == MAP_FAILED)
 	{
@@ -68,17 +65,9 @@ int main()
 		return -1;
 	}
 
-	example_struct->flag_alarm = 1;
-	example_struct->ready = 1;
-
-	munmap(example_struct, sizeof(*example_struct));
-
-	while(example_struct->ready != 0)
-		;
-
 	while (1)
 	{
-		mapa_print(&(example_struct->mapa));
+		mapa_print(&example_struct->mapa);
 	}
 
 	screen_end();
