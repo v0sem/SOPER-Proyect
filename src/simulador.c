@@ -394,7 +394,7 @@ int main()
 					printf("[JEFE %d] leido %s\n", i, readbuffer_jefe[i]);
 					shared_memory->mensaje_simulador_jefe[i] = 0;
 
-					if (strcmp("TURNO", readbuffer_jefe[i]) == 0)
+					if (strstr(readbuffer_jefe[i], "TURNO") != 0)
 					{
 						printf("[JEFE %d]: escribiendo... \n", i);
 						for (j = 0; j < N_NAVES; j++)
@@ -441,7 +441,7 @@ int main()
 							shared_memory->mensaje_jefe_nave[i][aux1] = 1;
 						}
 					}
-					else if (strcmp(readbuffer_jefe[i], "FIN")==0)
+					else if (strstr(readbuffer_jefe[i], "FIN") != 0)
 					{
 						printf("[JEFE %d] fin de la simulacion\n",i);
 						signal(SIGTERM, SIG_IGN);
@@ -560,7 +560,7 @@ int main()
 
 			printf("[SIMULADOR] leido: %s %d %d por parte de la nave %d del equipo %d\n", action.action, action.x, action.y, action.i, action.j);
 
-			if (strcmp(action.action, string_ataque) == 0)
+			if (strstr(action.action, string_ataque) == 0)
 			{
 				nave_aux = atacar(&(shared_memory->mapa), shared_memory->nave[action.i][action.j],
 								  action.x, action.y);
@@ -581,7 +581,7 @@ int main()
 					}
 				}
 			}
-			else if (strcmp(action.action, string_mover) == 0)
+			else if (strstr(action.action, string_mover) == 0)
 			{
 				mover(&(shared_memory->mapa), &(shared_memory->nave[action.i][action.j]),
 					  action.x, action.y);
