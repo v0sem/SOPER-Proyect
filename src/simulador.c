@@ -18,6 +18,8 @@ typedef struct
 	int x;
 	int y;
 	char action[20];
+	int i;
+	int j;
 } Mensaje;
 
 typedef struct
@@ -61,7 +63,8 @@ void manejador_SIGUSR2(int sig)
 	fflush(stdout);
 }
 
-Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy, int range);
+Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy);
+Mensaje ship_move(tipo_mapa mapa, int orix, int oriy);
 
 int main()
 {
@@ -88,7 +91,7 @@ int main()
 	int pipe_jefe_simulador[N_NAVES][2];
 	/*Cada jefe tiene una pipe por cada nave para comunicarse con ellas*/
 	int pipe_jefe_nave[N_EQUIPOS][N_NAVES][2];
-	int nbytes, pipe_status;
+	int pipe_status;
 
 	/*Cola de mensajes para comunicacion entre naves y simulador*/
 	mqd_t msg_queue;
@@ -296,20 +299,31 @@ int main()
 						{
 							read(pipe_jefe_nave[i][j][0], readbuffer, sizeof(readbuffer));
 							printf("[NAVE %d DEL EQUIPO %d] recibido %s\n", i, j, readbuffer);
-						}
+							shared_memory->mensaje_jefe_nave[i][j]--;
+						
+							if(strcmp(string_ataque, readbuffer) == 0){
+								/*La nave que es es su j y el equipo es el del proceso jefe (la i)*/
+								action = ship_attack(shared_memory->mapa, shared_memory->nave[i][j].posx, shared_memory->nave[i][j].posy);
+								printf("Accion que estoy enviando: %s y a la posicion %d %d\n\n",action.action,action.x, action.y);
+								action.i = i;
+								action.j = j;
+							}
+							else if(strcmp("MOVER_ALEATORIO", readbuffer) == 0){
+								action = ship_move(shared_memory->mapa, shared_memory->nave[i][j].posx, shared_memory->nave[i][j].posy);
+								printf("Accion que estoy enviando: %s y a la posicion %d %d\n\n",action.action,action.x, action.y);
+								action.i = i;
+								action.j = j;
+							}
+							else if(strcmp("DESTRUIR", readbuffer) == 0){
+								exit(EXIT_SUCCESS);
+							}
 
-						//if(mq_receive(msg_queue, (char *)&action, sizeof(action), NULL) == -1){
-						//    printf("ERRORSITO\n");
-						//}
-						//printf("%s\n",action.action);
-						///*La nave que es es su j y el equipo es el del proceso jefe (la i)*/
-						//action = ship_action(shared_memory->mapa, shared_memory->nave[i][j].posx, shared_memory->nave[i][j].posy, ATAQUE_ALCANCE);
-						//printf("Accion que estoy enviando: %s y a la posicion %d %d\n\n",action.action,action.x, action.y);
-						//if(mq_send(msg_queue, (char *)&action, sizeof(action), 1) == -1){
-						//	printf("[ERROR] Enviando la accion al simulador "
-						//	"desde la nave %d in team %d\n", j, i);
-						//	return -1;
-						//}
+							if(mq_send(msg_queue, (char *)&action, sizeof(action), 1) == -1){
+								printf("[ERROR] Enviando la accion al simulador "
+								"desde la nave %d in team %d\n", j, i);
+							return -1;
+						}
+						}
 					}
 				}
 			}
@@ -444,9 +458,27 @@ int main()
 				shared_memory->mensaje_simulador_jefe[i]--;
 			}
 		}
+
+		for(i = 0; i < N_EQUIPOS * N_NAVES; i++){
+			
+			if(mq_receive(msg_queue, (char *)&action, sizeof(action), NULL) == -1){
+				printf("ERRORSITO\n");
+			}
+
+			if(strcmp(action.action, string_ataque) == 0){
+				atacar(&(shared_memory->mapa), shared_memory->nave[action.i][action.j],
+					action.x, action.y);
+			}
+			else if(strcmp(action.action, "MOVER_ALEATORIO") == 0){
+				mover(&(shared_memory->mapa), &(shared_memory->nave[action.i][action.j]),
+					action.x, action.y);
+			}
+		}
 	}
 
-	/*Esperamos a los procesos hijos*/
+	/*Esperamos a los p
+￼Write ￼Preview
+rocesos hijos*/
 	for (i = 0; i < N_EQUIPOS; i++)
 	{
 		wait(0);
@@ -568,7 +600,7 @@ void atacar(tipo_mapa *mapa, tipo_nave nave_atacante, int x, int y)
 	return;
 }
 
-Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy, int range){
+Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy){
 	
 	int i, x, y;
 	Mensaje action;
@@ -584,13 +616,9 @@ Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy, int range){
 				{ //Only those in the circunference
 					if (mapa_is_casilla_vacia(&mapa, y, x) == false)
 					{
-						if (mapa_get_distancia(&mapa, oriy, orix, y, x) <= range)
-						{
-							action.x = x;
-							action.y = y;
-							strcpy(action.action, "ATAQUE");
-							return action;
-						}
+						action.x = x;
+						action.y = y;
+						strcpy(action.action, "ATAQUE");
                     }
 						
 				}
@@ -598,5 +626,30 @@ Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy, int range){
 		}
 	}
 
-    return NULL;
+    return action;
+}
+
+Mensaje ship_move(tipo_mapa mapa, int orix, int oriy){
+	int choice, newx, newy;
+	Mensaje action = {
+		.x = orix,
+		.y = oriy,
+		.action = "MOVER_ALEATORIO"
+	};
+	
+
+	choice = rand()%2;
+
+	if(choice == 0){
+		newx = rand()%3 - 1;
+		newx += orix;
+		action.x = newx;
+	}
+	else{
+		newy = rand()%3 - 1;
+		newy += oriy;
+		action.y = newy;
+	}
+
+	return action;
 }
