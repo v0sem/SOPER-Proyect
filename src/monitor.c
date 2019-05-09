@@ -42,6 +42,7 @@ typedef struct
 	int mensaje_jefe_simulador[N_EQUIPOS]; //para indicar los mensajes del simulador que tiene que leer cada jefe
 	int mensaje_jefe_nave[N_EQUIPOS][N_NAVES];
 	int contador_mqqueue;
+	int ready;
 } sharedMemoryStruct;
 
 int main()
@@ -68,8 +69,12 @@ int main()
 	}
 
 	example_struct->flag_alarm = 1;
+	example_struct->ready = 1;
 
 	munmap(example_struct, sizeof(*example_struct));
+
+	while(example_struct->ready != 0)
+		;
 
 	while (1)
 	{
