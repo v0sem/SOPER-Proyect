@@ -56,7 +56,7 @@ void manejador_SIGUSR2(int sig) {
 	fflush(stdout);
 }
 
-Mensaje ship_action(tipo_mapa mapa, int orix, int oriy, int range);
+Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy, int range);
 
 
 
@@ -269,24 +269,34 @@ int main() {
 				close(pipe_jefe_nave[i][j][1]);
 
                 while(1){
+					read(pipe_jefe_nave[i][j][0], readbuffer, sizeof(readbuffer));
 
+                    printf("%s\n", readbuffer);
 
+					if(strcmp("ATAQUE", readbuffer)){
+						/*La nave que es es su j y el equipo es el del proceso jefe (la i)*/
+						action = ship_attack(shared_memory->mapa, shared_memory->nave[i][j].posx, shared_memory->nave[i][j].posy, ATAQUE_ALCANCE);
+						printf("Accion que estoy enviando: %s y a la posicion %d %d\n\n",action.action,action.x, action.y);
+					}
+					else if(strcmp("MOVER_ALEATORIO", readbuffer)){
+						/*La nave que es es su j y el equipo es el del proceso jefe (la i)*/
+						action = ship_move(shared_memory->mapa, shared_memory->nave[i][j].posx, shared_memory->nave[i][j].posy, ATAQUE_ALCANCE);
+						printf("Accion que estoy enviando: %s y a la posicion %d %d\n\n",action.action,action.x, action.y);
+					}
+					else if(strcmp("DESTRUIR", readbuffer)){
+						exit(EXIT_SUCCESS);
+					}
 
-                    //if(mq_receive(msg_queue, (char *)&action, sizeof(action), NULL) == -1){
-                    //    printf("ERRORSITO\n");
-                    //}
-                    //printf("%s\n",action.action);
-                    ///*La nave que es es su j y el equipo es el del proceso jefe (la i)*/
-					//action = ship_action(shared_memory->mapa, shared_memory->nave[i][j].posx, shared_memory->nave[i][j].posy, ATAQUE_ALCANCE);
-                    //printf("Accion que estoy enviando: %s y a la posicion %d %d\n\n",action.action,action.x, action.y);
-					//if(mq_send(msg_queue, (char *)&action, sizeof(action), 1) == -1){
-					//	printf("[ERROR] Enviando la accion al simulador "
-					//	"desde la nave %d in team %d\n", j, i);
-					//	return -1;
-					//}
+					if(mq_send(msg_queue, (char *)&action, sizeof(action), 1) == -1){
+						printf("[ERROR] Enviando la accion al simulador "
+						"desde la nave %d in team %d\n", j, i);
+						return -1;
+					}
                 }
                     
 				}
+
+				//Do something
 				return 0;
 			}
             
@@ -395,6 +405,7 @@ int main() {
 				for (i=0; i<N_EQUIPOS; i++){
 					write(pipe_simulador_jefe[i][1], string_turno, strlen(string_turno));
 				}
+			
 			shared_memory->flag_alarm = 0;
 			}
 
@@ -527,7 +538,7 @@ void atacar(tipo_mapa *mapa,tipo_nave nave_atacante ,int x, int y){
 	return;
 }
 
-Mensaje ship_action(tipo_mapa mapa, int orix, int oriy, int range){
+Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy, int range){
 	
 	int i, x, y;
 	Mensaje action;
@@ -545,29 +556,14 @@ Mensaje ship_action(tipo_mapa mapa, int orix, int oriy, int range){
                             strcpy(action.action, "ATAQUE");
 							return action;
 						}
-						else{//Move closer
-							if(x > orix)
-								x = orix++;
-							else
-								x = orix--;
-							
-							if(y > oriy)
-								y = oriy++;
-							else
-								y = oriy--;
-
-							action.x = x;
-							action.y = y;
-							strcpy(action.action, "MOVER");
-							return action;
-						}
                     }
 						
 				}
 			}
 		}
 	}
-    return action;
+
+    return NULL;
 }
 
 
