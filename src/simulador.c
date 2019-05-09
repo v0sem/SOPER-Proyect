@@ -9,8 +9,6 @@
 #include <signal.h>
 #include <math.h>
 #include <stdbool.h>
-#include <semaphore.h>
-#include <sys/sem.h>
 #include <unistd.h>
 
 #include <mapa.h>
@@ -25,21 +23,22 @@ typedef struct{
 	int flag_alarm; //El flag que identifica que se ha activado la señal de alarm
 	tipo_mapa mapa; //EL mapa
 	tipo_nave nave[N_EQUIPOS][N_NAVES];
+	int mensaje_simulador_jefe[N_EQUIPOS]; //para indicar los mensajes del jefe que debe leer el proceso simulador
+	int mensaje_jefe_simulador[N_EQUIPOS]; //para indicar los mensajes del simulador que tiene que leer cada jefe
 	} sharedMemoryStruct;
 
 
 void manejador_SIGALRM(int sig) {
 	/*Abrimos la memoria compartida*/
-	int fd_shm = shm_open(SHM_NAME, O_RDWR, 0); 
+	int fd_shm = shm_open(SHM_NAME, O_RDWR, S_IWUSR); 
 	
 	if(fd_shm == -1){
 		fprintf (stderr, "Error opening the shared memory segment \n");
 		return;
 	}
-    
 	
 	/* Map the memory segment */
-	sharedMemoryStruct * example_struct = mmap(NULL, sizeof(*example_struct),PROT_READ, MAP_SHARED, fd_shm, 0);
+	sharedMemoryStruct * example_struct = mmap(NULL, sizeof(*example_struct),PROT_WRITE, MAP_SHARED, fd_shm, 0);
 	
 	if(example_struct == MAP_FAILED){
 		fprintf (stderr, "Error mapping the shared memory segment \n");
@@ -47,7 +46,7 @@ void manejador_SIGALRM(int sig) {
 	}
 	
 	example_struct->flag_alarm = 1;
-
+	
 	munmap(example_struct, sizeof(*example_struct));
 }
 
@@ -57,48 +56,8 @@ void manejador_SIGUSR2(int sig) {
 	fflush(stdout);
 }
 
-Mensaje ship_action(tipo_mapa mapa, int orix, int oriy, int range){
-	
-	int i, x, y;
-	Mensaje action;
+Mensaje ship_action(tipo_mapa mapa, int orix, int oriy, int range);
 
-
-	//Search for the nearest ship, in circles profressively larger around the ship
-	for(i = 0; i < MAPA_MAXX; i++){//Choose the circle radius
-		for(x = -i; x<=i; x++){
-			for(y = -i; y<=i; y++){
-				if(x == i || y == i || x == -i || y == -i){//Only those in the circunference
-					if(mapa_is_casilla_vacia(&mapa, y, x) == false){
-                        if(mapa_get_distancia(&mapa, oriy, orix, y, x) <= range){
-							action.x = x;
-							action.y = y;
-                            strcpy(action.action, "ATAQUE");
-							return action;
-						}
-						else{//Move closer
-							if(x > orix)
-								x = orix++;
-							else
-								x = orix--;
-							
-							if(y > oriy)
-								y = oriy++;
-							else
-								y = oriy--;
-
-							action.x = x;
-							action.y = y;
-							strcpy(action.action, "MOVER");
-							return action;
-						}
-                    }
-						
-				}
-			}
-		}
-	}
-    return action;
-}
 
 
 int main() {
@@ -113,10 +72,8 @@ int main() {
 
 	char string_turno[] = "TURNO";
 	char string_fin[] = "FIN";
-    char sem_nombre[5][N_EQUIPOS];
-    strcpy(sem_nombre[0],"/sem1");
-    strcpy(sem_nombre[1],"/sem2");
-    strcpy(sem_nombre[2],"/sem3");
+    char string_ataque[] = "ATAQUE";
+
 
     char readbuffer[80];
 
@@ -124,17 +81,13 @@ int main() {
 
 	pid_t pid_boss, pid_ship; //Para los procesos hijos
 
-    sem_t *sem_jefe[N_EQUIPOS];
-
-    for(i=0; i<N_EQUIPOS; i++){
-        sem_jefe[i] = NULL;
-    }
-
-
-	/*Necesito una pipe para comunicarme con el jefe de cada equipo*/
+	/*Necesito una pipe por jefe para para que el simulador envie mensajes a los jefes*/
 	int pipe_simulador_jefe[N_EQUIPOS][2];
-    //int pipe_jefe_nave[N_NAVES][2];
-	int nbytes, pipe_status[N_EQUIPOS];
+    /*Necesito una pipe por jefe para que le envien mensajes al simulador*/
+    int pipe_jefe_simulador[N_NAVES][2];
+	/*Cada jefe tiene una pipe por cada nave para comunicarse con ellas*/
+	int pipe_jefe_nave[N_EQUIPOS][N_NAVES][2];
+	int nbytes, pipe_status
 
 	/*Cola de mensajes para comunicacion entre naves y simulador*/
 	mqd_t msg_queue;
@@ -155,7 +108,7 @@ int main() {
     printf("Simulador: Gestionando la memoria compartida:\n\n");
 	int fd_shm = shm_open(SHM_NAME, O_RDWR | O_CREAT | O_EXCL,S_IRUSR | S_IWUSR);
 	if(fd_shm == -1){
-		printf("[ERROR] No se ha creado correctamente la memoria compartida");
+		printf("[ERROR] No se ha creado correctamente la memoria compartida\n");
 		return -1;
 	}
 
@@ -175,31 +128,52 @@ int main() {
 		return EXIT_FAILURE;
 	}
 
-	/*La memoria compartida ya esta creada*/
-    /*Ahora los semaforos*/
-    for(i=0;i<N_EQUIPOS;i++){
-		if((sem_jefe[i] = sem_open(sem_nombre[i], O_CREAT | O_EXCL, S_IRUSR | S_IWUSR, 0))== SEM_FAILED){
-        	printf("[ERROR] al crear el semaforo para el equipo %d\n",i);
-			munmap(shared_memory, sizeof(*shared_memory));
-			shm_unlink(SHM_NAME);
-        	exit(EXIT_FAILURE);
-        }
-    }
+	for(i = 0; i < N_EQUIPOS; i++){
+		shared_memory->mensaje_simulador_jefe[i] = 0;
+		shared_memory->mensaje_jefe_simulador[i] = 0;
+	}
+
 	
+
+
+
+	/*La memoria compartida ya esta creada*/
+
+	/*Creamos las pipes para la comunicacion entre en simulador y los jefes*/
 	for(i=0 ; i<N_EQUIPOS; i++){
-		pipe_status[i] = pipe(pipe_simulador_jefe[i]);
-		if(pipe_status[i] == -1){
+		pipe_status = pipe(pipe_simulador_jefe[i]);
+		if(pipe_status == -1){
 			printf("[ERROR] No se ha creado la tuberia para el equipo :%d\n",i);
 			munmap(shared_memory, sizeof(*shared_memory));
 			shm_unlink(SHM_NAME);
-			for(i = 0; i<N_EQUIPOS; i++){
-				sem_unlink(sem_nombre[i]);
-				sem_close(sem_jefe[i]);
-			}
+				
+			exit(EXIT_FAILURE);
+		}
+
+        pipe_status = pipe(pipe_jefe_simulador[i]);
+		if(pipe_status == -1){
+			printf("[ERROR] No se ha creado la tuberia para el equipo :%d\n",i);
+			munmap(shared_memory, sizeof(*shared_memory));
+			shm_unlink(SHM_NAME);
 				
 			exit(EXIT_FAILURE);
 		}
 			
+	}
+
+	/*Creamos las pipes para la comunicacion entre los jefes y las naves*/
+	for(i = 0; i < N_EQUIPOS; i++){
+		for(j = 0; j<N_NAVES; j++){
+			pipe_status = pipe(pipe_jefe_nave[i][j]);
+			if(pipe_status == -1){
+				printf("[ERROR] No se ha creado la tuberia para el el jefe %d y su nave %d\n",i,j);
+				munmap(shared_memory, sizeof(*shared_memory));
+				shm_unlink(SHM_NAME);
+
+				exit(EXIT_FAILURE);
+			}
+
+		}
 	}
 	
 	
@@ -243,10 +217,6 @@ int main() {
     if (sigaction(SIGUSR2, &act, NULL) < 0) {
 		munmap(shared_memory, sizeof(*shared_memory));
 		shm_unlink(SHM_NAME);
-		for(i = 0; i<N_EQUIPOS; i++){
-			sem_unlink(sem_nombre[i]);
-			sem_close(sem_jefe[i]);
-		}
         perror("sigaction");
         return EXIT_FAILURE;
     }
@@ -263,10 +233,6 @@ int main() {
 		printf("[ERROR] Opening the message queue");
 		munmap(shared_memory, sizeof(*shared_memory));
 		shm_unlink(SHM_NAME);
-		for(i = 0; i<N_EQUIPOS; i++){
-			sem_unlink(sem_nombre[i]);
-			sem_close(sem_jefe[i]);
-		}
 		return -1;
 	}
     printf("Simulador: Creando a los procesos jefes\n\n");
@@ -282,15 +248,11 @@ int main() {
 			printf("[ERROR] ha fallado el fork para el equipo %d\n",i);
 			munmap(shared_memory, sizeof(*shared_memory));
 			shm_unlink(SHM_NAME);
-			for(i = 0; i<N_EQUIPOS; i++){
-				sem_unlink(sem_nombre[i]);
-				sem_close(sem_jefe[i]);
-			}
 			return -1;
 		}
 
 		else if(pid_boss == 0){ //Hijo aka proceso jefe
-            kill(getppid(),SIGUSR2);
+            
 		/***********Creamos los procesos nave***********/
 			for(j = 0; j < N_NAVES; j++){
 				pid_ship = fork();
@@ -304,22 +266,27 @@ int main() {
 				}
 				else if(pid_ship == 0){//Caso hijo (Nave)
 
-                //while(1){
-                //    if(mq_receive(msg_queue, (char *)&action, sizeof(action), NULL) == -1){
-                //        printf("ERRORSITO\n");
-                //    }
-                //    printf("%s\n",action.action);
-                //    /*La nave que es es su j y el equipo es el del proceso jefe (la i)*/
-				//	action = ship_action(shared_memory->mapa, shared_memory->nave[i][j].posx, shared_memory->nave[i][j].posy, ATAQUE_ALCANCE);
-                //    printf("Accion que estoy enviando: %s y a la posicion %d %d\n\n",action.action,action.x, action.y);
-				//	if(mq_send(msg_queue, (char *)&action, sizeof(action), 1) == -1){
-				//		printf("[ERROR] Enviando la accion al simulador "
-				//		"desde la nave %d in team %d\n", j, i);
-				//		return -1;
-				//	}
-                //}
-                //    
-				//}
+				close(pipe_jefe_nave[i][j][1]);
+
+                while(1){
+
+
+
+                    //if(mq_receive(msg_queue, (char *)&action, sizeof(action), NULL) == -1){
+                    //    printf("ERRORSITO\n");
+                    //}
+                    //printf("%s\n",action.action);
+                    ///*La nave que es es su j y el equipo es el del proceso jefe (la i)*/
+					//action = ship_action(shared_memory->mapa, shared_memory->nave[i][j].posx, shared_memory->nave[i][j].posy, ATAQUE_ALCANCE);
+                    //printf("Accion que estoy enviando: %s y a la posicion %d %d\n\n",action.action,action.x, action.y);
+					//if(mq_send(msg_queue, (char *)&action, sizeof(action), 1) == -1){
+					//	printf("[ERROR] Enviando la accion al simulador "
+					//	"desde la nave %d in team %d\n", j, i);
+					//	return -1;
+					//}
+                }
+                    
+				}
 				return 0;
 			}
             
@@ -328,19 +295,37 @@ int main() {
             /******************************************************************/
             
 		}
-		/*****************CONTINUACION PROCESO JEFE************************/
+		/*****************CONTINUACION PROCESO JEFE. YA ESTAN LAS NAVES************************/
+		
 		/*inicializamos la pipe con la que se comunicara con el jefe*/
 		/* Cierre del descriptor de salida en el jefe */
-		
-        sem_wait(sem_jefe[i]);
-		printf("Entramos en el semaforo %d\n",i);
         close(pipe_simulador_jefe[i][1]);
-        read(pipe_simulador_jefe[i][0], readbuffer, sizeof(readbuffer));
-        printf("Jefe: %s\n",readbuffer);
-		/*Bucle que se ejecuta hasta el final de la partida*/
+        /*Cierre del descriptor de entrada en esta*/
+        close(pipe_jefe_simulador[i][0]);
+		/*Cerramos las pipes para comunicarnos con cada nave*/
+		for(j=0; j<N_NAVES; j++){
+			/*aqui envia*/
+			close(pipe_jefe_nave[i][j][0]);
+		}
+
+		kill(getppid(),SIGUSR2);
 		
+        
+		/*bucle que se ejecuta hasta el final de la partida*/
 		while(end_simulation == 0){
+			if(shared_memory->mensaje_jefe_simulador[i] > 0){
+				read(pipe_simulador_jefe[i][0], readbuffer, sizeof(readbuffer));
+            	printf("[JEFE] %s\n",readbuffer);
+				shared_memory->mensaje_jefe_simulador[i] --;
+				if(strcmp("TURNO",readbuffer) == 0){
+                	printf("[JEFE]: escribiendo... \n");
+                	write(pipe_jefe_simulador[i][1],string_ataque, strlen(string_ataque));
+					shared_memory->mensaje_simulador_jefe[i]++;
+            	}
 			return 0;
+			}
+            
+            
 		}
 		/*Termina el proceso cuando termina la simulacion*/
 		exit(EXIT_SUCCESS);
@@ -361,17 +346,21 @@ int main() {
 		exit(EXIT_FAILURE);
 	}
 	/*Montamos la alarma*/
-	if (alarm(ALARM))
+	if (alarm(5))
 		fprintf(stderr, "Existe una alarma previa establecida\n");
 
     printf("Simulador: NUEVO TURNO\n");
 	for (i=0; i<N_EQUIPOS; i++){
         close(pipe_simulador_jefe[i][0]);
+        close(pipe_jefe_simulador[i][1]);
 		write(pipe_simulador_jefe[i][1], string_turno, strlen(string_turno));
-        sem_post(sem_jefe[i]);
+		shared_memory->mensaje_jefe_simulador[i]++;
 	}
 
+	shared_memory->flag_alarm = 0;
+
 	while(end_simulation == 0){
+        printf("[SIMULADOR] Entrando en el bucle de la simulacion\n");
 		/*Cuando recibe la señal de alarma*/
 		if(shared_memory->flag_alarm == 1){
 			/*Restaurar el mapa*/
@@ -396,6 +385,7 @@ int main() {
 			/*Terminamos la partida. Hay un ganador*/
 			if(equipos_vivos == 1){
 				for (i=0; i<N_EQUIPOS; i++){
+                    printf("[SIMULADOR] FIN DE LA PARTIDA\n");
 					write(pipe_simulador_jefe[i][1], string_fin, strlen(string_fin));
 				}
 			}
@@ -407,8 +397,19 @@ int main() {
 				}
 			shared_memory->flag_alarm = 0;
 			}
+
+            
 			
 		}
+
+            for(i=0; i < N_EQUIPOS; i++){
+				if(shared_memory->mensaje_simulador_jefe[i] > 0){
+					read(pipe_jefe_simulador[i][0],readbuffer,sizeof(readbuffer));
+                	printf("[SIMULADOR] leido delreturn hijo %d: %s\n",i,readbuffer);
+					shared_memory->mensaje_simulador_jefe[i]--;
+				}
+            }
+            
 
 	}
 
@@ -422,10 +423,6 @@ int main() {
 	/*Liberamos recursos*/
 	munmap(shared_memory, sizeof(*shared_memory));
 	shm_unlink(SHM_NAME);
-	for(i = 0; i<N_EQUIPOS; i++){
-		sem_unlink(sem_nombre[i]);
-		sem_close(sem_jefe[i]);
-	}
 	exit(ret);
 	
 }
@@ -528,6 +525,49 @@ void atacar(tipo_mapa *mapa,tipo_nave nave_atacante ,int x, int y){
 		}
 	}
 	return;
+}
+
+Mensaje ship_action(tipo_mapa mapa, int orix, int oriy, int range){
+	
+	int i, x, y;
+	Mensaje action;
+
+
+	//Search for the nearest ship, in circles profressively larger around the ship
+	for(i = 0; i < MAPA_MAXX; i++){//Choose the circle radius
+		for(x = -i; x<=i; x++){
+			for(y = -i; y<=i; y++){
+				if(x == i || y == i || x == -i || y == -i){//Only those in the circunference
+					if(mapa_is_casilla_vacia(&mapa, y, x) == false){
+                        if(mapa_get_distancia(&mapa, oriy, orix, y, x) <= range){
+							action.x = x;
+							action.y = y;
+                            strcpy(action.action, "ATAQUE");
+							return action;
+						}
+						else{//Move closer
+							if(x > orix)
+								x = orix++;
+							else
+								x = orix--;
+							
+							if(y > oriy)
+								y = oriy++;
+							else
+								y = oriy--;
+
+							action.x = x;
+							action.y = y;
+							strcpy(action.action, "MOVER");
+							return action;
+						}
+                    }
+						
+				}
+			}
+		}
+	}
+    return action;
 }
 
 
