@@ -401,12 +401,10 @@ int main()
 						{
 							if (shared_memory->nave[i][j].viva != false)
 							{
-								while (shared_memory->mensaje_jefe_nave[i][j] != 0)
-									;
-
 								printf("[JEFE %d] enviando mover aleatorio a la nave %d\n", i, j);
 								while (shared_memory->mensaje_jefe_nave[i][j] != 0)
 									;
+									
 								write(pipe_jefe_nave[i][j][1], string_mover, strlen(string_mover));
 								shared_memory->mensaje_jefe_nave[i][j] = 1;
 							}
