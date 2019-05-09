@@ -343,7 +343,7 @@ int main()
 								action.i = i;
 								action.j = j;
 							}
-							else if (strcmp(string_destruir, readbuffer) != 0)
+							else if (strstr(readbuffer, string_destruir) != 0)
 							{
 								printf("[NAVE %d %d] me han eliminado\n", i, j);
 								shared_memory->mensaje_jefe_nave[i][j] = -1;
@@ -548,7 +548,7 @@ int main()
 			}
 		}
 
-		if (shared_memory->contador_mqqueue > 0)
+		while(shared_memory->contador_mqqueue > 0)
 		{
 			sem_wait(sem);
 			shared_memory->contador_mqqueue--;
@@ -588,70 +588,8 @@ int main()
 				printf("[SIMULADOR] realizado una movicion\n");
 			}
 		}
-
-		for(i = 0, aux2=0; i < N_EQUIPOS; i++){
-			for(j = 0; j < N_NAVES; j++){
-				if(shared_memory->nave[i][j].viva == true)
-					aux2++;
-			}
-		}
-
-		for(i = 0; i < aux2*2	; i++){
-			
-			if(shared_memory->contador_mqqueue > 0){
-				sem_wait(sem);
-				shared_memory->contador_mqqueue--;
-				sem_post(sem);
-				if(mq_receive(msg_queue, (char *)&action, sizeof(Mensaje), NULL) == -1){
-				printf("[ERROR]Cola de mensajes\n");
-			}
-
-			printf("[SIMULADOR] leido: %s\n",action.action);
-
-			if(strcmp(action.action, string_ataque) == 0){
-				nave_aux = atacar(&(shared_memory->mapa), shared_memory->nave[action.i][action.j],
-					action.x, action.y);
-
-				if(nave_aux.viva == false){
-					printf("OSTIAPUTA%d\n",shared_memory->mensaje_simulador_jefe[nave_aux.equipo]);
-					while(shared_memory->mensaje_simulador_jefe[nave_aux.equipo] > 0){
-						for(aux1 = 0; aux1 < N_NAVES; aux1++){
-							if(shared_memory->nave[nave_aux.equipo][aux1].viva == true){
-								break;
-							}
-						}
-
-						printf("AAAAAAAAAASDSDAAAFSASFASFSDFSD %d\n", aux1);
-
-						if(aux1 == N_NAVES){
-							write(pipe_simulador_jefe[nave_aux.equipo][1], string_fin,
-								strlen(string_fin));
-						}
-						else{
-							sprintf(string_destruir_nave, "DESTRUIR %d", nave_aux.numNave);
-
-							printf("AAAAAAAAAAAAAAAAAAAAAAAAAAAAA%s\n", string_destruir_nave);
-
-							write(pipe_simulador_jefe[nave_aux.equipo][1], string_destruir_nave,
-								strlen(string_destruir_nave));
-						}
-					}
-				}
-			}
-			else if(strcmp(action.action, string_mover) == 0){
-				mover(&(shared_memory->mapa), &(shared_memory->nave[action.i][action.j]),
-					action.x, action.y);
-					printf("[SIMULADOR] realizado una movicion\n");
-			}
-			}
-			
-
-			
-
-			
-		}
+		
 	}
-
 	/*Esperamos a los p
 ￼Write ￼Preview
 rocesos hijos*/
@@ -789,7 +727,7 @@ Mensaje ship_attack(tipo_mapa mapa, int orix, int oriy)
 		{
 			for (y = oriy - i; y <= oriy + i; y++)
 			{
-				if (x == i || y == i || x == -i || y == -i)
+				if (x - orix == i || y - oriy == i || x - orix == -i || y - oriy == -i)
 				{ //Only those in the circunference
 					if (mapa_is_casilla_vacia(&mapa, y, x) == false)
 					{
